@@ -40,13 +40,20 @@ P4_UTILS_BRANCH="master"
 PROTOBUF_VER="3.20.3"
 PROTOBUF_COMMIT="v${PROTOBUF_VER}"
 
+# --- BMv2 source (your fork) ---
+# repo can be https or ssh; ref can be branch, tag, or commit sha
+BMV2_REPO="${BMV2_REPO:-https://github.com/DerHeimataerde/behavioral-model.git}"
+BMV2_REF="${BMV2_REF:-forensic-tools-base}"   # e.g. "forensic-tools-base" or "3bd7037"
+BMV2_DIR="${BMV2_DIR:-bmv2}"                  # checkout dir name
+
 # from https://github.com/p4lang/PI#dependencies
 # changed it from 1.43.2 since pip does not have it and my source build fails
 GRPC_VER="1.44.0"
 GRPC_COMMIT="tags/v${GRPC_VER}"
 
 PI_COMMIT="6d0f3d6c08d595f65c7d96fd852d9e0c308a6f30"    # Aug 21 2023
-BMV2_COMMIT="d064664b58b8919782a4c60a3b9dbe62a835ac74"  # Sep 8 2023
+# old BMv2 commit
+# BMV2_COMMIT="d064664b58b8919782a4c60a3b9dbe62a835ac74"  # Sep 8 2023
 P4C_COMMIT="66eefdea4c00e3fbcc4723bd9c8a8164e7288724"   # Sep 13 2023
 
 #FRROUTING_COMMIT="18f209926fb659790926b82dd4e30727311d22aa" # Mar 25 2021
@@ -269,20 +276,64 @@ function site_packages_fix {
 }
 
 function do_bmv2_deps {
-    # Clone source
-    cd ${BUILD_DIR}
-    if [ ! -d bmv2 ]; then
-        git clone https://github.com/p4lang/behavioral-model.git bmv2
-    fi
-    cd bmv2
-    git checkout ${BMV2_COMMIT}
+    cd "${BUILD_DIR}"
 
-    # Install dependencies
+    if [ ! -d "${BMV2_DIR}" ]; then
+        git clone "${BMV2_REPO}" "${BMV2_DIR}"
+    fi
+
+    cd "${BMV2_DIR}"
+    # ensure we’re on your fork + desired ref
+    git remote set-url origin "${BMV2_REPO}"
+    git fetch --all --tags
+    git checkout -f "${BMV2_REF}" || {
+        echo "ERROR: BMv2 ref '${BMV2_REF}' not found in ${BMV2_REPO}"; exit 1;
+    }
+
+    # BMv2’s own dependency installer
     ./install_deps.sh
 }
 
+
 # Install behavioral model
+
 function do_bmv2 {
+    # If P4_RUNTIME=false, we still need deps
+    if [ "$P4_RUNTIME" = false ]; then
+        do_bmv2_deps
+    fi
+
+    cd "${BUILD_DIR}"
+
+    if [ ! -d "${BMV2_DIR}" ]; then
+        git clone "${BMV2_REPO}" "${BMV2_DIR}"
+    fi
+
+    cd "${BMV2_DIR}"
+    git remote set-url origin "${BMV2_REPO}"
+    git fetch --all --tags
+    git checkout -f "${BMV2_REF}" || {
+        echo "ERROR: BMv2 ref '${BMV2_REF}' not found in ${BMV2_REPO}"; exit 1;
+    }
+
+    ./autogen.sh
+    if [ "$DEBUG_FLAGS" = true ] && [ "$P4_RUNTIME" = true ]; then
+        ./configure --with-pi --with-thrift --with-nanomsg --enable-debugger --disable-elogger "CXXFLAGS=-O0 -g"
+    elif [ "$DEBUG_FLAGS" = true ] && [ "$P4_RUNTIME" = false ]; then
+        ./configure --with-thrift --with-nanomsg --enable-debugger --enable-elogger "CXXFLAGS=-O0 -g"
+    elif [ "$DEBUG_FLAGS" = false ] && [ "$P4_RUNTIME" = true ]; then
+        ./configure --with-pi --without-nanomsg --disable-elogger --disable-logging-macros 'CFLAGS=-g -O2' 'CXXFLAGS=-g -O2'
+    else
+        ./configure --without-nanomsg --disable-elogger --disable-logging-macros 'CFLAGS=-g -O2' 'CXXFLAGS=-g -O2'
+    fi
+
+    make -j"${NUM_CORES}"
+    sudo make install
+    sudo ldconfig
+}
+
+# Old function to install bmv2, unused
+function do_bmv2_old {
     # Install dependencies
     if [ "$P4_RUNTIME" = false ]; then
         do_bmv2_deps
