@@ -42,9 +42,9 @@ PROTOBUF_COMMIT="v${PROTOBUF_VER}"
 
 # --- BMv2 source (your fork) ---
 # repo can be https or ssh; ref can be branch, tag, or commit sha
-BMV2_REPO="${BMV2_REPO:-https://github.com/DerHeimataerde/behavioral-model.git}"
-BMV2_REF="${BMV2_REF:-forensic-tools-base}"   # e.g. "forensic-tools-base" or "3bd7037"
-BMV2_DIR="${BMV2_DIR:-bmv2}"                  # checkout dir name
+BMV2_REPO="https://github.com/DerHeimataerde/behavioral-model.git"   # or: git@github.com:DerHeimataerde/behavioral-model.git
+BMV2_REF="forensic-tools-base"                                      
+BMV2_DIR="bmv2"
 
 # from https://github.com/p4lang/PI#dependencies
 # changed it from 1.43.2 since pip does not have it and my source build fails
@@ -283,20 +283,18 @@ function do_bmv2_deps {
     fi
 
     cd "${BMV2_DIR}"
-    # ensure we’re on your fork + desired ref
+    # point existing clone at fork
     git remote set-url origin "${BMV2_REPO}"
-    git fetch --all --tags
-    git checkout -f "${BMV2_REF}" || {
-        echo "ERROR: BMv2 ref '${BMV2_REF}' not found in ${BMV2_REPO}"; exit 1;
-    }
+    git fetch --all --tags --prune
 
-    # BMv2’s own dependency installer
+    # checkout branch
+    git checkout -f "${BMV2_REF}" || git checkout -B "${BMV2_REF}" "origin/${BMV2_REF}"
+
+    # BMv2’s dependency installer
     ./install_deps.sh
 }
 
-
 # Install behavioral model
-
 function do_bmv2 {
     # If P4_RUNTIME=false, we still need deps
     if [ "$P4_RUNTIME" = false ]; then
@@ -304,17 +302,14 @@ function do_bmv2 {
     fi
 
     cd "${BUILD_DIR}"
-
     if [ ! -d "${BMV2_DIR}" ]; then
         git clone "${BMV2_REPO}" "${BMV2_DIR}"
     fi
 
     cd "${BMV2_DIR}"
     git remote set-url origin "${BMV2_REPO}"
-    git fetch --all --tags
-    git checkout -f "${BMV2_REF}" || {
-        echo "ERROR: BMv2 ref '${BMV2_REF}' not found in ${BMV2_REPO}"; exit 1;
-    }
+    git fetch --all --tags --prune
+    git checkout -f "${BMV2_REF}" || git checkout -B "${BMV2_REF}" "origin/${BMV2_REF}"
 
     ./autogen.sh
     if [ "$DEBUG_FLAGS" = true ] && [ "$P4_RUNTIME" = true ]; then
@@ -387,29 +382,23 @@ function do_bmv2_old {
 }
 
 # not used in the install
+# modified just in case
 function do_bmv2_opt {
-    # Install dependencies
-    if [ "$P4_RUNTIME" = false ]; then
-        do_bmv2_deps
+    cd "${BUILD_DIR}"
+    if [ ! -d "${BMV2_DIR}" ]; then
+        git clone "${BMV2_REPO}" "${BMV2_DIR}"
     fi
+    cd "${BMV2_DIR}"
+    git remote set-url origin "${BMV2_REPO}"
+    git fetch --all --tags --prune
+    git checkout -f "${BMV2_REF}" || git checkout -B "${BMV2_REF}" "origin/${BMV2_REF}"
 
-    # Clone source
-    cd ${BUILD_DIR}
-    if [ ! -d bmv2 ]; then
-        git clone https://github.com/p4lang/behavioral-model.git bmv2-opt
-    fi
-    cd bmv2
-    git checkout ${BMV2_COMMIT}
-
-    # Build behavioral-model
     ./autogen.sh
-    # with nanomsg for digests
     ./configure --disable-elogger --disable-logging-macros 'CFLAGS=-g -O2' 'CXXFLAGS=-g -O2'
-    make -j${NUM_CORES}
+    make -j"${NUM_CORES}"
     sudo make install
     sudo ldconfig
 }
-
 
 # Install sysrepo dependencies
 function do_sysrepo_libyang_deps {
