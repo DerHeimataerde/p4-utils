@@ -615,47 +615,39 @@ function do_mininet {
 
 # Install mininet
 function do_mininet_no_python2 {
-    cd "$HOME"
+  cd "$HOME"
+  MININET_COMMIT="5b1b376336e1c6330308e64ba41baac6976b6874"
 
-    # Pin to the known-good commit
-    MININET_COMMIT="5b1b376336e1c6330308e64ba41baac6976b6874"  # 2023-May-28
+  if [ -d "mininet" ]; then
+    sudo chattr -Ri mininet || true
+    sudo chown -R "$USER":"$USER" mininet || true
+  fi
 
-    if [ -d "mininet/.git" ]; then
-        echo "[Mininet] Existing repo found. Resetting to ${MININET_COMMIT}…"
-        git -C mininet fetch origin
-        git -C mininet checkout -f "${MININET_COMMIT}"
-        git -C mininet reset --hard "${MININET_COMMIT}"
-        git -C mininet clean -xfd
-    elif [ -d "mininet" ]; then
-        echo "[Mininet] Directory exists but is not a git repo. Removing…"
-        rm -rf mininet
-        git clone https://github.com/mininet/mininet mininet
-        git -C mininet checkout "${MININET_COMMIT}"
-    else
-        echo "[Mininet] Cloning fresh…"
-        git clone https://github.com/mininet/mininet mininet
-        git -C mininet checkout "${MININET_COMMIT}"
+  if [ -d "mininet/.git" ]; then
+    echo "[Mininet] Existing repo found. Resetting to ${MININET_COMMIT}…"
+    if ! git -C mininet fetch origin \
+      || ! git -C mininet checkout -f "${MININET_COMMIT}" \
+      || ! git -C mininet reset --hard "${MININET_COMMIT}" \
+      || ! git -C mininet clean -xfd
+    then
+      echo "[Mininet] Reset/clean failed; removing and recloning."
+      sudo rm -rf mininet
+      git clone https://github.com/mininet/mininet mininet
+      git -C mininet checkout "${MININET_COMMIT}"
     fi
+  else
+    [ -d "mininet" ] && sudo rm -rf mininet
+    git clone https://github.com/mininet/mininet mininet
+    git -C mininet checkout "${MININET_COMMIT}"
+  fi
 
-    cd mininet
+  cd mininet
+  wget -O mininet.patch https://raw.githubusercontent.com/nsg-ethz/p4-utils/${P4_UTILS_BRANCH}/install-tools/conf_files/mininet.patch
+  patch -p1 --dry-run < mininet.patch >/dev/null 2>&1 && patch -p1 < mininet.patch || true
 
-    # Apply the p4-utils patch only if not already applied
-    wget -O mininet.patch https://raw.githubusercontent.com/nsg-ethz/p4-utils/${P4_UTILS_BRANCH}/install-tools/conf_files/mininet.patch
-    if patch -p1 --dry-run < mininet.patch >/dev/null 2>&1; then
-        echo "[Mininet] Applying patch…"
-        patch -p1 < mininet.patch
-    else
-        echo "[Mininet] Patch already applied or not applicable; continuing."
-    fi
-
-    # Make sure help2man is present for manpage generation
-    sudo apt-get install -y --no-install-recommends help2man
-
-    echo "[Mininet] Installing…"
-    sudo PYTHON=python3 ./util/install.sh -nwv
-    echo "[Mininet] Done."
+  sudo apt-get install -y --no-install-recommends help2man
+  sudo PYTHON=python3 ./util/install.sh -nwv
 }
-
 
 # Install libyang necessary for FRRouting
 # for ubuntu 20.04 :http://docs.frrouting.org/projects/dev-guide/en/latest/building-frr-for-ubuntu2004.html
