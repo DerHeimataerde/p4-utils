@@ -300,13 +300,19 @@ function do_bmv2_deps {
     rm -rf "${BMV2_DIR}"
 
     echo "[BMv2] Cloning ${BMV2_REPO} -> ${BMV2_DIR}"
-    git clone "${BMV2_RePO:-$BMV2_REPO}" "${BMV2_DIR}"
+    git clone "${BMV2_REPO:-$BMV2_REPO}" "${BMV2_DIR}"
     cd "${BMV2_DIR}"
 
     git remote set-url origin "${BMV2_REPO}"
-    git fetch --all --tags --prune
-    git checkout -f "${BMV2_REF}" || git checkout -B "${BMV2_REF}" "origin/${BMV2_REF}"
-
+	git fetch --all --tags --prune
+	
+	# If BMV2_REF is a branch on origin, point the local branch at the remote tip.
+	if git show-ref --verify --quiet "refs/remotes/origin/${BMV2_REF}"; then
+	  git checkout -B "${BMV2_REF}" "origin/${BMV2_REF}"
+	else
+	  # Otherwise treat REF as a tag/commit SHA.
+	  git checkout -f "${BMV2_REF}"
+	fi
     # BMv2 dep installer
     ./install_deps.sh
 
@@ -322,13 +328,30 @@ function do_bmv2 {
         git clone "${BMV2_REPO}" "${BMV2_DIR}"
         cd "${BMV2_DIR}"
         git remote set-url origin "${BMV2_REPO}"
-        git fetch --all --tags --prune
-        git checkout -f "${BMV2_REF}" || git checkout -B "${BMV2_REF}" "origin/${BMV2_REF}"
+        #git fetch --all --tags --prune
+        #git checkout -f "${BMV2_REF}" || git checkout -B "${BMV2_REF}" "origin/${BMV2_REF}"
+		git fetch --all --tags --prune
+		
+		# If BMV2_REF is a branch on origin, point the local branch at the remote tip.
+		if git show-ref --verify --quiet "refs/remotes/origin/${BMV2_REF}"; then
+		  git checkout -B "${BMV2_REF}" "origin/${BMV2_REF}"
+		else
+		  # Otherwise treat REF as a tag/commit SHA.
+		  git checkout -f "${BMV2_REF}"
+		fi
+		git remote set-url origin "${BMV2_REPO}"
     else
         cd "${BMV2_DIR}"
         # Ensure we are on the right ref even if deps already cloned it.
         git fetch --all --tags --prune
-        git checkout -f "${BMV2_REF}" || git checkout -B "${BMV2_REF}" "origin/${BMV2_REF}"
+		
+		# If BMV2_REF is a branch on origin, point the local branch at the remote tip.
+		if git show-ref --verify --quiet "refs/remotes/origin/${BMV2_REF}"; then
+		  git checkout -B "${BMV2_REF}" "origin/${BMV2_REF}"
+		else
+		  # Otherwise treat REF as a tag/commit SHA.
+		  git checkout -f "${BMV2_REF}"
+		fi
     fi
 
     ./autogen.sh
