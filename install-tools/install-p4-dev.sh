@@ -232,27 +232,41 @@ function do_protobuf {
 }
 
 function do_grpc {
-    # Clone source
-    cd ${BUILD_DIR}
-    if [ ! -d grpc ]; then
-      git clone https://github.com/grpc/grpc.git grpc
+    # If grpc (and grpc++) are already available at or above GRPC_VER, skip.
+    if pkg-config --exists grpc; then
+        HAVE_VER="$(pkg-config --modversion grpc 2>/dev/null || echo 0)"
+        if dpkg --compare-versions "$HAVE_VER" ge "$GRPC_VER"; then
+            echo "[gRPC] System has grpc >= ${GRPC_VER} (found ${HAVE_VER}); skipping build."
+            return 0
+        else
+            echo "[gRPC] Found grpc ${HAVE_VER} < ${GRPC_VER}; rebuilding from source."
+        fi
+    else
+        echo "[gRPC] pkg-config does not see grpc; building v${GRPC_VER}."
     fi
+
+    cd "${BUILD_DIR}"
+    rm -rf grpc
+    git clone --depth 1 --branch "v${GRPC_VER}" https://github.com/grpc/grpc.git grpc
     cd grpc
-    git checkout ${GRPC_COMMIT}
-    git submodule update --init --recursive
+    git submodule update --init --recursive --depth 1
 
-    # Build grpc
     export LDFLAGS="-Wl,-s"
+    rm -rf cmake/build
+    mkdir -p cmake/build && cd cmake/build
 
-    mkdir -p cmake/build
-    cd cmake/build
-    cmake ../..
-    make
-    sudo make install 
+    cmake \
+      -DgRPC_INSTALL=ON \
+      -DgRPC_BUILD_TESTS=OFF \
+      -DABSL_PROPAGATE_CXX_STD=ON \
+      ../..
+
+    make -j"${NUM_CORES}"
+    sudo make install
     sudo ldconfig
-
     unset LDFLAGS
-    echo "grpc installed"
+
+    echo "[gRPC] Installed v${GRPC_VER}"
 }
 
 PY3LOCALPATH=`curl -sSL https://raw.githubusercontent.com/nsg-ethz/p4-utils/${P4_UTILS_BRANCH}/install-tools/scripts/py3localpath.py | python3`
@@ -275,41 +289,47 @@ function site_packages_fix {
     echo "Done!"
 }
 
+# Ifv re-clone in deps, remember so do_bmv2 doesn't clone twice
+BMV2_ALREADY_CLONED=""
+
 function do_bmv2_deps {
     cd "${BUILD_DIR}"
 
-    if [ ! -d "${BMV2_DIR}" ]; then
-        git clone "${BMV2_REPO}" "${BMV2_DIR}"
-    fi
+    # Always clean & re-clone BMv2 from your fork/branch
+    echo "[BMv2] Removing any existing checkout at ${BUILD_DIR}/${BMV2_DIR}"
+    rm -rf "${BMV2_DIR}"
 
+    echo "[BMv2] Cloning ${BMV2_REPO} -> ${BMV2_DIR}"
+    git clone "${BMV2_RePO:-$BMV2_REPO}" "${BMV2_DIR}"
     cd "${BMV2_DIR}"
-    # point existing clone at fork
+
     git remote set-url origin "${BMV2_REPO}"
     git fetch --all --tags --prune
-
-    # checkout branch
     git checkout -f "${BMV2_REF}" || git checkout -B "${BMV2_REF}" "origin/${BMV2_REF}"
 
-    # BMv2’s dependency installer
+    # BMv2 dep installer
     ./install_deps.sh
+
+    BMV2_ALREADY_CLONED="yes"
 }
 
-# Install behavioral model
 function do_bmv2 {
-    # If P4_RUNTIME=false, we still need deps
-    if [ "$P4_RUNTIME" = false ]; then
-        do_bmv2_deps
-    fi
-
+    # Ensure sources are present exactly as requested.
     cd "${BUILD_DIR}"
-    if [ ! -d "${BMV2_DIR}" ]; then
+    if [ -z "${BMV2_ALREADY_CLONED}" ]; then
+        echo "[BMv2] Fresh reinstall requested; deleting existing checkout (if any)."
+        rm -rf "${BMV2_DIR}"
         git clone "${BMV2_REPO}" "${BMV2_DIR}"
+        cd "${BMV2_DIR}"
+        git remote set-url origin "${BMV2_REPO}"
+        git fetch --all --tags --prune
+        git checkout -f "${BMV2_REF}" || git checkout -B "${BMV2_REF}" "origin/${BMV2_REF}"
+    else
+        cd "${BMV2_DIR}"
+        # Ensure we are on the right ref even if deps already cloned it.
+        git fetch --all --tags --prune
+        git checkout -f "${BMV2_REF}" || git checkout -B "${BMV2_REF}" "origin/${BMV2_REF}"
     fi
-
-    cd "${BMV2_DIR}"
-    git remote set-url origin "${BMV2_REPO}"
-    git fetch --all --tags --prune
-    git checkout -f "${BMV2_REF}" || git checkout -B "${BMV2_REF}" "origin/${BMV2_REF}"
 
     ./autogen.sh
     if [ "$DEBUG_FLAGS" = true ] && [ "$P4_RUNTIME" = true ]; then
@@ -325,6 +345,8 @@ function do_bmv2 {
     make -j"${NUM_CORES}"
     sudo make install
     sudo ldconfig
+
+    echo "[BMv2] Built from ${BMV2_REPO} @ ${BMV2_REF}"
 }
 
 # Old function to install bmv2, unused
